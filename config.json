@@ -1,0 +1,31 @@
+{
+  "port": "/dev/ttyUSB0",
+  "slave": 1,
+  "baud": 38400,
+  "parity": "E",
+  "bytesize": 8,
+  "stopbits": 1,
+  "start": 8960,
+  "count": 103,
+  "interval": 1.0,
+  "timeout": 3.0,
+  "metadata": "registers/status_var.xlsx",
+  "no_clear": false,
+  "no_color": false
+}
+
+// Opis ustawien:
+// port      - port szeregowy, np. COM3 w Windows lub /dev/ttyUSB0 w Linuxie.
+// slave     - adres urzadzenia Modbus.
+// baud      - predkosc transmisji w bodach.
+// parity    - parzystosc: N = brak, E = even, O = odd.
+// bytesize  - liczba bitow danych: 5, 6, 7 lub 8.
+// stopbits  - liczba bitow stopu: 1, 1.5 lub 2.
+//             parity, bytesize i stopbits definiuja format, np. 8E1.
+// start     - pierwszy adres rejestru do sprawdzenia.
+// count     - liczba adresow w wybranym zakresie.
+// interval  - odstep miedzy kolejnymi odczytami, w sekundach.
+// timeout   - maksymalny czas oczekiwania na odpowiedz, w sekundach.
+// metadata  - plik XLSX z mapa zmiennych; sciezka wzgledna liczona od config.json.
+// no_clear  - true dopisuje kolejne raporty zamiast uzywac interaktywnej tabeli.
+// no_color  - true wylacza kolory w terminalu.

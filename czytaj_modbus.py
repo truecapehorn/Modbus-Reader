@@ -1,5 +1,6 @@
 import asyncio
 import argparse
+import json
 import time
 from datetime import datetime
 from pathlib import Path
@@ -387,32 +388,195 @@ class RegisterMonitor(App):
         self.query_one("#registers", DataTable).scroll_end(animate=False)
 
 
+def remove_json_line_comments(contents):
+    cleaned = []
+    in_string = False
+    escaped = False
+    index = 0
+
+    while index < len(contents):
+        char = contents[index]
+        if in_string:
+            cleaned.append(char)
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            index += 1
+        elif char == '"':
+            in_string = True
+            cleaned.append(char)
+            index += 1
+        elif char == "/" and index + 1 < len(contents) and contents[index + 1] == "/":
+            while index < len(contents) and contents[index] != "\n":
+                cleaned.append(" ")
+                index += 1
+        else:
+            cleaned.append(char)
+            index += 1
+
+    return "".join(cleaned)
+
+
+def load_config(path):
+    config_path = Path(path)
+    try:
+        with config_path.open(encoding="utf-8") as config_file:
+            config = json.loads(remove_json_line_comments(config_file.read()))
+    except OSError as error:
+        raise SystemExit(
+            f"Nie mozna odczytac pliku konfiguracji {config_path}: {error}"
+        ) from error
+    except json.JSONDecodeError as error:
+        raise SystemExit(
+            f"Nieprawidlowy JSON w pliku konfiguracji {config_path}, "
+            f"wiersz {error.lineno}, kolumna {error.colno}."
+        ) from error
+
+    if not isinstance(config, dict):
+        raise SystemExit(f"Plik konfiguracji {config_path} musi zawierac obiekt JSON.")
+
+    expected_types = {
+        "port": str,
+        "slave": int,
+        "baud": int,
+        "start": int,
+        "count": int,
+        "interval": float,
+        "timeout": float,
+        "parity": str,
+        "bytesize": int,
+        "stopbits": float,
+        "metadata": str,
+        "no_clear": bool,
+        "no_color": bool,
+    }
+    unknown = config.keys() - expected_types.keys()
+    missing = expected_types.keys() - config.keys()
+    if unknown:
+        raise SystemExit(
+            f"Nieznane ustawienia w pliku {config_path}: "
+            + ", ".join(sorted(unknown))
+        )
+    if missing:
+        raise SystemExit(
+            f"Brak ustawien w pliku {config_path}: "
+            + ", ".join(sorted(missing))
+        )
+
+    for key, expected_type in expected_types.items():
+        value = config[key]
+        valid = (
+            type(value) is expected_type
+            or expected_type is float and type(value) is int
+        )
+        if not valid:
+            raise SystemExit(
+                f"Ustawienie '{key}' w pliku {config_path} ma nieprawidlowy typ."
+            )
+        if expected_type is float:
+            config[key] = float(value)
+
+    if config["parity"] not in {"N", "E", "O"}:
+        raise SystemExit(
+            f"Ustawienie 'parity' w pliku {config_path} musi miec wartosc N, E lub O."
+        )
+    if config["bytesize"] not in {5, 6, 7, 8}:
+        raise SystemExit(
+            f"Ustawienie 'bytesize' w pliku {config_path} musi miec wartosc 5, 6, 7 lub 8."
+        )
+    if config["stopbits"] not in {1.0, 1.5, 2.0}:
+        raise SystemExit(
+            f"Ustawienie 'stopbits' w pliku {config_path} musi miec wartosc 1, 1.5 lub 2."
+        )
+
+    metadata_path = Path(config["metadata"])
+    if not metadata_path.is_absolute():
+        config["metadata"] = str(config_path.resolve().parent / metadata_path)
+    return config
+
+
 def main():
+    config_parser = argparse.ArgumentParser(add_help=False)
+    config_parser.add_argument(
+        "--config",
+        default=str(Path(__file__).parent / "config.json"),
+        help="Plik JSON z domyslnymi ustawieniami (obsluguje komentarze //)",
+    )
+    config_args, _ = config_parser.parse_known_args()
+    config = load_config(config_args.config)
+
     parser = argparse.ArgumentParser(
         description="Cykliczny odczyt rejestrow Modbus RTU przez pymodbus"
     )
-    parser.add_argument("--port", default="/dev/ttyUSB0", help="Port, np. /dev/ttyUSB0 lub COM3")
-    parser.add_argument("--slave", type=int, default=1, help="Adres urzadzenia Modbus")
-    parser.add_argument("--baud", type=int, default=38400, help="Predkosc transmisji")
-    parser.add_argument("--start", type=int, default=8960, help="Pierwszy adres rejestru")
-    parser.add_argument("--count", type=int, default=103, help="Liczba rejestrow")
-    parser.add_argument("--interval", type=float, default=1.0, help="Przerwa miedzy odczytami w sekundach")
-    parser.add_argument("--timeout", type=float, default=3.0, help="Limit czasu pojedynczego odczytu w sekundach")
     parser.add_argument(
+        "--config",
+        default=config_args.config,
+        help="Plik JSON z domyslnymi ustawieniami (obsluguje komentarze //)",
+    )
+    parser.add_argument("--port", help="Port, np. /dev/ttyUSB0 lub COM3")
+    parser.add_argument("--slave", type=int, help="Adres urzadzenia Modbus")
+    parser.add_argument("--baud", type=int, help="Predkosc transmisji")
+    parser.add_argument("--start", type=int, help="Pierwszy adres rejestru")
+    parser.add_argument("--count", type=int, help="Liczba rejestrow")
+    parser.add_argument(
+        "--interval",
+        type=float,
+        help="Przerwa miedzy odczytami w sekundach",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        help="Limit czasu pojedynczego odczytu w sekundach",
+    )
+    parser.add_argument(
+        "--parity",
+        choices=("N", "E", "O"),
+        help="Parzystosc transmisji",
+    )
+    parser.add_argument(
+        "--bytesize",
+        type=int,
+        choices=(5, 6, 7, 8),
+        help="Liczba bitow danych",
+    )
+    parser.add_argument(
+        "--stopbits",
+        type=float,
+        choices=(1, 1.5, 2),
+        help="Liczba bitow stopu",
+    )
+    clear_group = parser.add_mutually_exclusive_group()
+    clear_group.add_argument(
         "--no-clear",
         action="store_true",
         help="Nie czysc terminala; dopisuj kolejne odczyty (przydatne do logowania)",
     )
-    parser.add_argument(
+    clear_group.add_argument(
+        "--clear",
+        dest="no_clear",
+        action="store_false",
+        help="Uzyj interaktywnej tabeli",
+    )
+    color_group = parser.add_mutually_exclusive_group()
+    color_group.add_argument(
         "--no-color",
         action="store_true",
         help="Wylacz kolorowanie wartosci",
     )
+    color_group.add_argument(
+        "--color",
+        dest="no_color",
+        action="store_false",
+        help="Wlacz kolorowanie wartosci",
+    )
     parser.add_argument(
         "--metadata",
-        default=str(Path(__file__).parent / "registers" / "status_var.xlsx"),
         help="Plik XLSX z arkuszem Status_var",
     )
+    parser.set_defaults(**config)
     args = parser.parse_args()
 
     register_info = load_register_info(args.metadata)
@@ -429,9 +593,9 @@ def main():
     client = ModbusSerialClient(
         port=args.port,
         baudrate=args.baud,
-        parity="E",
-        bytesize=8,
-        stopbits=1,
+        parity=args.parity,
+        bytesize=args.bytesize,
+        stopbits=args.stopbits,
         timeout=args.timeout,
     )
     try:

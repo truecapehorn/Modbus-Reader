@@ -26,9 +26,9 @@ W kolejnych sesjach PowerShell aktywuj środowisko poleceniem:
 .\.venv\Scripts\Activate.ps1
 ```
 
-Skrypt używa komunikacji RTU z parzystością `even`, 8 bitami danych i 1 bitem
-stopu (8E1). Wymaganie `pymodbus` jest przypięte do wersji 3.8.6, która
-obsługuje Python 3.9 i nowszy.
+Domyślne parametry programu, w tym komunikacji RTU (8E1), znajdują się w pliku
+`config.json` obok skryptu. Wymaganie `pymodbus` jest przypięte do wersji 3.8.6,
+która obsługuje Python 3.9 i nowszy.
 
 ## Uruchomienie
 
@@ -54,16 +54,35 @@ Pełną listę opcji można wyświetlić poleceniem:
 
 | Opcja | Domyślnie | Opis |
 |---|---:|---|
+| `--config` | `config.json` obok skryptu | Plik JSON z domyślnymi ustawieniami. |
 | `--port` | `/dev/ttyUSB0` | Port szeregowy, np. `COM3` w Windows lub `/dev/ttyUSB0` w Linuxie. |
 | `--slave` | `1` | Adres urządzenia Modbus. |
 | `--baud` | `38400` | Prędkość transmisji. |
+| `--parity` | `E` | Parzystość: `N`, `E` lub `O`. |
+| `--bytesize` | `8` | Liczba bitów danych: `5`, `6`, `7` lub `8`. |
+| `--stopbits` | `1` | Liczba bitów stopu: `1`, `1.5` lub `2`. |
 | `--start` | `8960` | Pierwszy adres rejestru zakresu. |
 | `--count` | `103` | Liczba adresów w zakresie, począwszy od `--start`. |
 | `--interval` | `1.0` | Odstęp między kolejnymi odczytami, w sekundach. |
 | `--timeout` | `3.0` | Limit czasu odpowiedzi Modbus, w sekundach. |
 | `--metadata` | `registers/status_var.xlsx` obok skryptu | Ścieżka do pliku XLSX z arkuszem `Status_var`. |
 | `--no-clear` | wyłączone | Zamiast interaktywnej tabeli wypisuje kolejne raporty w terminalu; przydatne do przekierowania wyjścia do pliku. |
+| `--clear` | — | Wymusza interaktywną tabelę, także gdy `no_clear` jest włączone w konfiguracji. |
 | `--no-color` | wyłączone | Wyłącza kolorowanie wartości. |
+| `--color` | — | Włącza kolorowanie, także gdy `no_color` jest włączone w konfiguracji. |
+
+Plik `config.json` obsługuje komentarze rozpoczynające się od `//`, dzięki
+czemu przy każdym ustawieniu znajduje się jego opis. Wartości w pliku są
+domyślne; podanie opcji w wierszu poleceń
+zastępuje odpowiadającą jej wartość z konfiguracji. Można wskazać inny plik:
+
+```powershell
+.\.venv\Scripts\python.exe .\czytaj_modbus.py --config ".\moja-konfiguracja.json"
+```
+
+Edytuj wartości w `config.json`, aby zmienić ustawienia domyślne. Ścieżka
+względna w polu `metadata` jest liczona względem katalogu pliku konfiguracji.
+Plik musi zawierać wszystkie klucze widoczne w domyślnym `config.json`.
 
 Przykład zmiany zakresu i częstotliwości odczytu:
 
