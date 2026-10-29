@@ -1,11 +1,17 @@
 import asyncio
 import argparse
-import re
-import shutil
-import subprocess
 import time
 from datetime import datetime
 from pathlib import Path
+
+try:
+    from pymodbus.client import ModbusSerialClient
+    from pymodbus.exceptions import ModbusException
+except ImportError as error:
+    raise SystemExit(
+        "Brak biblioteki pymodbus. Zainstaluj zaleznosci poleceniem: "
+        "python -m pip install -r requirements.txt"
+    ) from error
 
 try:
     from rich.console import Console, Group
@@ -15,8 +21,8 @@ try:
     from textual.widgets import DataTable, Footer, Header, Static
 except ImportError as error:
     raise SystemExit(
-        "Brak wymaganej biblioteki Rich lub Textual. Zainstaluj je poleceniem: "
-        "python3 -m pip install rich textual"
+        "Brak wymaganej biblioteki Rich lub Textual. Zainstaluj zaleznosci "
+        "poleceniem: python -m pip install -r requirements.txt"
     ) from error
 
 
@@ -26,7 +32,7 @@ def load_register_info(path):
     except ImportError as error:
         raise SystemExit(
             "Brak biblioteki openpyxl. Zainstaluj ja poleceniem: "
-            "python -m pip install openpyxl"
+            "python -m pip install -r requirements.txt"
         ) from error
 
     workbook_path = Path(path)
@@ -98,15 +104,6 @@ def load_register_info(path):
     return register_info
 
 
-def parse_register_values(output):
-    return {
-        int(address): value.strip()
-        for address, value in re.findall(
-            r"^\s*\[(\d+)\]\s*:\s*(.*?)\s*$", output, re.MULTILINE
-        )
-    }
-
-
 def contiguous_ranges(addresses):
     sorted_addresses = sorted(set(addresses))
     if not sorted_addresses:
@@ -121,53 +118,55 @@ def contiguous_ranges(addresses):
     yield range_start, previous - range_start + 1
 
 
-def read_register_range(command, start, count, timeout):
-    range_command = command.copy()
-    range_command[range_command.index("-r") + 1] = str(start)
-    range_command[range_command.index("-c") + 1] = str(count)
-
+def read_register_range(client, slave, start, count):
     try:
-        result = subprocess.run(
-            range_command,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
+        if not client.connected and not client.connect():
+            raise ConnectionError("Nie udalo sie polaczyc z portem szeregowym.")
+        response = client.read_holding_registers(
+            start, count=count, slave=slave
         )
-    except subprocess.TimeoutExpired:
+    except (ModbusException, OSError) as error:
         return {}, {
-            address: "Timeout"
+            address: str(error) or error.__class__.__name__
             for address in range(start, start + count)
         }
 
-    output = result.stdout + result.stderr
-    values = parse_register_values(output)
-    if result.returncode == 0 and values:
-        return values, {}
+    if response.isError():
+        if getattr(response, "exception_code", None) == 2 and count > 1:
+            left_count = count // 2
+            left_values, left_errors = read_register_range(
+                client, slave, start, left_count
+            )
+            right_values, right_errors = read_register_range(
+                client, slave, start + left_count, count - left_count
+            )
+            return left_values | right_values, left_errors | right_errors
 
-    if "Illegal Data Address" in output and count > 1:
-        left_count = count // 2
-        left_values, left_errors = read_register_range(
-            command, start, left_count, timeout
-        )
-        right_values, right_errors = read_register_range(
-            command, start + left_count, count - left_count, timeout
-        )
-        return (
-            left_values | right_values,
-            left_errors | right_errors,
-        )
+        error = str(response)
+        return {}, {
+            address: error
+            for address in range(start, start + count)
+        }
 
-    error = output.strip() or f"modpoll exit code {result.returncode}"
-    return {}, {
-        address: error
-        for address in range(start, start + count)
-        if address not in values
+    values = {
+        address: str(value)
+        for address, value in enumerate(response.registers, start=start)
     }
+    if len(values) != count:
+        error = (
+            f"Odpowiedz zawiera {len(values)} rejestrow; "
+            f"oczekiwano {count}."
+        )
+        return values, {
+            address: error
+            for address in range(start, start + count)
+            if address not in values
+        }
+    return values, {}
 
 
 def read_configured_registers(
-    command, register_info, start, count, timeout, on_update=None
+    client, slave, register_info, start, count, on_update=None
 ):
     last_address = start + count - 1
     addresses = []
@@ -181,7 +180,7 @@ def read_configured_registers(
     errors = {}
     for block_start, block_count in contiguous_ranges(addresses):
         block_values, block_errors = read_register_range(
-            command, block_start, block_count, timeout
+            client, slave, block_start, block_count
         )
         values.update(block_values)
         errors.update(block_errors)
@@ -288,20 +287,20 @@ class RegisterMonitor(App):
 
     def __init__(
         self,
-        command,
+        client,
+        slave,
         register_info,
         start,
         count,
-        timeout,
         interval,
         no_color=False,
     ):
         super().__init__(ansi_color=not no_color)
-        self.command = command
+        self.client = client
+        self.slave = slave
         self.register_info = register_info
         self.start = start
         self.count = count
-        self.timeout = timeout
         self.interval = interval
         self.value_column = None
 
@@ -352,11 +351,11 @@ class RegisterMonitor(App):
         while True:
             values, errors = await asyncio.to_thread(
                 read_configured_registers,
-                self.command,
+                self.client,
+                self.slave,
                 self.register_info,
                 self.start,
                 self.count,
-                self.timeout,
             )
 
             table = self.query_one("#registers", DataTable)
@@ -390,7 +389,7 @@ class RegisterMonitor(App):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Cykliczny odczyt rejestrow Modbus RTU przez modpoll"
+        description="Cykliczny odczyt rejestrow Modbus RTU przez pymodbus"
     )
     parser.add_argument("--port", default="/dev/ttyUSB0", help="Port, np. /dev/ttyUSB0 lub COM3")
     parser.add_argument("--slave", type=int, default=1, help="Adres urzadzenia Modbus")
@@ -399,7 +398,6 @@ def main():
     parser.add_argument("--count", type=int, default=103, help="Liczba rejestrow")
     parser.add_argument("--interval", type=float, default=1.0, help="Przerwa miedzy odczytami w sekundach")
     parser.add_argument("--timeout", type=float, default=3.0, help="Limit czasu pojedynczego odczytu w sekundach")
-    parser.add_argument("--modpoll", default="modpoll", help="Sciezka do programu modpoll")
     parser.add_argument(
         "--no-clear",
         action="store_true",
@@ -412,18 +410,13 @@ def main():
     )
     parser.add_argument(
         "--metadata",
-        default=str(Path(__file__).parent / "export" / "status_var.xlsx"),
+        default=str(Path(__file__).parent / "registers" / "status_var.xlsx"),
         help="Plik XLSX z arkuszem Status_var",
     )
     args = parser.parse_args()
 
     register_info = load_register_info(args.metadata)
     console = Console(no_color=args.no_color)
-    if shutil.which(args.modpoll) is None:
-        raise SystemExit(
-            f"Nie znaleziono programu {args.modpoll!r}. "
-            "Zainstaluj modpoll albo podaj jego sciezke przez --modpoll."
-        )
 
     configured_addresses = [
         address
@@ -433,29 +426,23 @@ def main():
     if not configured_addresses:
         raise SystemExit("Zakres nie zawiera zadnego adresu z arkusza Status_var.")
 
-    command = [
-        args.modpoll,
-        "-1",
-        "-m", "rtu",
-        "-b", str(args.baud),
-        "-p", "even",
-        "-d", "8",
-        "-s", "1",
-        "-a", str(args.slave),
-        "-r", str(args.start),
-        "-c", str(args.count),
-        args.port,
-    ]
-
+    client = ModbusSerialClient(
+        port=args.port,
+        baudrate=args.baud,
+        parity="E",
+        bytesize=8,
+        stopbits=1,
+        timeout=args.timeout,
+    )
     try:
         if args.no_clear:
             while True:
                 values, errors = read_configured_registers(
-                    command,
+                    client,
+                    args.slave,
                     register_info,
                     args.start,
                     args.count,
-                    args.timeout,
                 )
                 console.print(
                     build_dashboard(
@@ -469,17 +456,19 @@ def main():
                 time.sleep(args.interval)
         else:
             RegisterMonitor(
-                command=command,
+                client=client,
+                slave=args.slave,
                 register_info=register_info,
                 start=args.start,
                 count=args.count,
-                timeout=args.timeout,
                 interval=args.interval,
                 no_color=args.no_color,
             ).run()
 
     except KeyboardInterrupt:
         console.print("\nZatrzymano odczyt.")
+    finally:
+        client.close()
 
 
 if __name__ == "__main__":
