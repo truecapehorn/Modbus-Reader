@@ -11,8 +11,9 @@ pokazywany w interaktywnej tabeli terminalowej.
 
 ## Przygotowanie środowiska
 
-W PowerShellu, z katalogu projektu, utwórz i aktywuj wirtualne środowisko,
-a następnie zainstaluj zależności:
+Polecenia wykonuj z katalogu projektu.
+
+### Windows (PowerShell)
 
 ```powershell
 python -m venv .venv
@@ -20,10 +21,33 @@ python -m venv .venv
 python -m pip install -r .\requirements.txt
 ```
 
-W kolejnych sesjach PowerShell aktywuj środowisko poleceniem:
+Jeśli PowerShell blokuje aktywację skryptu, uruchom jednorazowo:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+W kolejnych sesjach aktywuj środowisko ponownie:
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
+```
+
+### Linux (bash)
+
+Jeśli system nie ma jeszcze `venv`, doinstaluj pakiet dla swojej dystrybucji
+(np. `sudo apt install python3-venv` w Ubuntu/Debian). Następnie:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+```
+
+W kolejnych sesjach aktywuj środowisko poleceniem:
+
+```bash
+source .venv/bin/activate
 ```
 
 Domyślne parametry programu, w tym komunikacji RTU (8E1), znajdują się w pliku
@@ -32,7 +56,9 @@ która obsługuje Python 3.9 i nowszy.
 
 ## Uruchomienie
 
-W PowerShellu, z katalogu zawierającego skrypt:
+Uruchamiaj polecenia z katalogu projektu.
+
+### Windows (PowerShell)
 
 ```powershell
 .\.venv\Scripts\python.exe .\czytaj_modbus.py
@@ -44,10 +70,22 @@ Przykład z ustawieniami dla portu COM3:
 .\.venv\Scripts\python.exe .\czytaj_modbus.py --port COM3 --slave 1 --baud 38400
 ```
 
-Pełną listę opcji można wyświetlić poleceniem:
+### Linux (bash)
 
-```powershell
-.\.venv\Scripts\python.exe .\czytaj_modbus.py --help
+```bash
+./.venv/bin/python czytaj_modbus.py
+```
+
+Przykład z ustawieniami dla portu `/dev/ttyUSB0`:
+
+```bash
+./.venv/bin/python czytaj_modbus.py --port /dev/ttyUSB0 --slave 1 --baud 38400
+```
+
+Pełną listę opcji można wyświetlić:
+
+```bash
+./.venv/bin/python czytaj_modbus.py --help
 ```
 
 ## Opcje
@@ -74,11 +112,19 @@ Pełną listę opcji można wyświetlić poleceniem:
 
 Plik `config.json` obsługuje komentarze rozpoczynające się od `//`, dzięki
 czemu przy każdym ustawieniu znajduje się jego opis. Wartości w pliku są
-domyślne; podanie opcji w wierszu poleceń
-zastępuje odpowiadającą jej wartość z konfiguracji. Można wskazać inny plik:
+domyślne; podanie opcji w wierszu poleceń zastępuje odpowiadającą jej wartość
+z konfiguracji. Można wskazać inny plik:
+
+Windows (PowerShell):
 
 ```powershell
 .\.venv\Scripts\python.exe .\czytaj_modbus.py --config ".\moja-konfiguracja.json"
+```
+
+Linux (bash):
+
+```bash
+./.venv/bin/python czytaj_modbus.py --config ./moja-konfiguracja.json
 ```
 
 Edytuj wartości w `config.json`, aby zmienić ustawienia domyślne. Ścieżka
@@ -91,10 +137,22 @@ Przykład zmiany zakresu i częstotliwości odczytu:
 .\.venv\Scripts\python.exe .\czytaj_modbus.py --port COM3 --start 8960 --count 103 --interval 2
 ```
 
+Na Linuxie:
+
+```bash
+./.venv/bin/python czytaj_modbus.py --port /dev/ttyUSB0 --start 8960 --count 103 --interval 2
+```
+
 Przykład wskazania własnego pliku z opisami:
 
 ```powershell
 .\.venv\Scripts\python.exe .\czytaj_modbus.py --port COM3 --metadata ".\registers\status_var.xlsx"
+```
+
+Na Linuxie:
+
+```bash
+./.venv/bin/python czytaj_modbus.py --port /dev/ttyUSB0 --metadata ./registers/status_var.xlsx
 ```
 
 ## Plik z opisami zmiennych
@@ -133,10 +191,16 @@ zawiera adresy PDU i mają być przekazywane bez zmian.
 - Jeżeli zakres nie zawiera żadnego adresu z arkusza, skrypt zakończy działanie
   z komunikatem o błędzie.
 
-Przykładowe dopisywanie raportów do pliku:
+Przykładowe dopisywanie raportów do pliku — Windows (PowerShell):
 
 ```powershell
 .\.venv\Scripts\python.exe .\czytaj_modbus.py --port COM3 --no-clear *> .\odczyt_modbus.log
+```
+
+Linux (bash):
+
+```bash
+./.venv/bin/python czytaj_modbus.py --port /dev/ttyUSB0 --no-clear > odczyt_modbus.log 2>&1
 ```
 
 ## Typowe problemy
