@@ -41,13 +41,17 @@ def load_register_info(path):
         raise SystemExit(f"Nie znaleziono pliku z mapa zmiennych: {workbook_path}")
 
     workbook = load_workbook(workbook_path, data_only=True, read_only=True)
-    try:
+    if "Status_var" in workbook.sheetnames:
         sheet = workbook["Status_var"]
-    except KeyError as error:
+    elif len(workbook.worksheets) == 1:
+        sheet = workbook.worksheets[0]
+    else:
+        available_sheets = ", ".join(workbook.sheetnames)
         workbook.close()
         raise SystemExit(
-            f"Arkusz 'Status_var' nie istnieje w pliku {workbook_path}"
-        ) from error
+            f"Arkusz 'Status_var' nie istnieje w pliku {workbook_path}. "
+            f"Dostepne arkusze: {available_sheets}"
+        )
 
     rows = sheet.iter_rows(values_only=True)
     headers = next(rows, None)
@@ -119,12 +123,12 @@ def contiguous_ranges(addresses):
     yield range_start, previous - range_start + 1
 
 
-def read_register_range(client, slave, start, count):
+def read_register_range(client, slave, start, count, address_base):
     try:
         if not client.connected and not client.connect():
             raise ConnectionError("Nie udalo sie polaczyc z portem szeregowym.")
         response = client.read_holding_registers(
-            start, count=count, slave=slave
+            start - address_base, count=count, slave=slave
         )
     except (ModbusException, OSError) as error:
         return {}, {
@@ -136,10 +140,10 @@ def read_register_range(client, slave, start, count):
         if getattr(response, "exception_code", None) == 2 and count > 1:
             left_count = count // 2
             left_values, left_errors = read_register_range(
-                client, slave, start, left_count
+                client, slave, start, left_count, address_base
             )
             right_values, right_errors = read_register_range(
-                client, slave, start + left_count, count - left_count
+                client, slave, start + left_count, count - left_count, address_base
             )
             return left_values | right_values, left_errors | right_errors
 
@@ -167,7 +171,7 @@ def read_register_range(client, slave, start, count):
 
 
 def read_configured_registers(
-    client, slave, register_info, start, count, on_update=None
+    client, slave, register_info, start, count, address_base, on_update=None
 ):
     last_address = start + count - 1
     addresses = []
@@ -181,7 +185,7 @@ def read_configured_registers(
     errors = {}
     for block_start, block_count in contiguous_ranges(addresses):
         block_values, block_errors = read_register_range(
-            client, slave, block_start, block_count
+            client, slave, block_start, block_count, address_base
         )
         values.update(block_values)
         errors.update(block_errors)
@@ -294,6 +298,7 @@ class RegisterMonitor(App):
         start,
         count,
         interval,
+        address_base,
         no_color=False,
     ):
         super().__init__(ansi_color=not no_color)
@@ -302,6 +307,7 @@ class RegisterMonitor(App):
         self.register_info = register_info
         self.start = start
         self.count = count
+        self.address_base = address_base
         self.interval = interval
         self.value_column = None
 
@@ -357,6 +363,7 @@ class RegisterMonitor(App):
                 self.register_info,
                 self.start,
                 self.count,
+                self.address_base,
             )
 
             table = self.query_one("#registers", DataTable)
@@ -443,6 +450,7 @@ def load_config(path):
         "slave": int,
         "baud": int,
         "start": int,
+        "address_base": int,
         "count": int,
         "interval": float,
         "timeout": float,
@@ -491,6 +499,10 @@ def load_config(path):
         raise SystemExit(
             f"Ustawienie 'stopbits' w pliku {config_path} musi miec wartosc 1, 1.5 lub 2."
         )
+    if config["address_base"] not in {0, 1}:
+        raise SystemExit(
+            f"Ustawienie 'address_base' w pliku {config_path} musi miec wartosc 0 lub 1."
+        )
 
     metadata_path = Path(config["metadata"])
     if not metadata_path.is_absolute():
@@ -520,6 +532,12 @@ def main():
     parser.add_argument("--slave", type=int, help="Adres urzadzenia Modbus")
     parser.add_argument("--baud", type=int, help="Predkosc transmisji")
     parser.add_argument("--start", type=int, help="Pierwszy adres rejestru")
+    parser.add_argument(
+        "--address-base",
+        type=int,
+        choices=(0, 1),
+        help="Numeracja adresow rejestrow: 0 lub 1",
+    )
     parser.add_argument("--count", type=int, help="Liczba rejestrow")
     parser.add_argument(
         "--interval",
@@ -579,6 +597,12 @@ def main():
     parser.set_defaults(**config)
     args = parser.parse_args()
 
+    if args.start < args.address_base:
+        raise SystemExit(
+            f"Adres poczatkowy musi byc wiekszy lub rowny address_base "
+            f"({args.address_base})."
+        )
+
     register_info = load_register_info(args.metadata)
     console = Console(no_color=args.no_color)
 
@@ -607,6 +631,7 @@ def main():
                     register_info,
                     args.start,
                     args.count,
+                    args.address_base,
                 )
                 console.print(
                     build_dashboard(
@@ -625,6 +650,7 @@ def main():
                 register_info=register_info,
                 start=args.start,
                 count=args.count,
+                address_base=args.address_base,
                 interval=args.interval,
                 no_color=args.no_color,
             ).run()

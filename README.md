@@ -62,6 +62,7 @@ Pełną listę opcji można wyświetlić poleceniem:
 | `--bytesize` | `8` | Liczba bitów danych: `5`, `6`, `7` lub `8`. |
 | `--stopbits` | `1` | Liczba bitów stopu: `1`, `1.5` lub `2`. |
 | `--start` | `8960` | Pierwszy adres rejestru zakresu. |
+| `--address-base` | `1` | Numeracja adresów z arkusza i zakresu: `1` (jak `modpoll`) lub `0` (adres PDU). |
 | `--count` | `103` | Liczba adresów w zakresie, począwszy od `--start`. |
 | `--interval` | `1.0` | Odstęp między kolejnymi odczytami, w sekundach. |
 | `--timeout` | `3.0` | Limit czasu odpowiedzi Modbus, w sekundach. |
@@ -99,7 +100,9 @@ Przykład wskazania własnego pliku z opisami:
 ## Plik z opisami zmiennych
 
 Domyślny plik to `registers/status_var.xlsx`, liczony względem katalogu, w którym
-znajduje się skrypt. Musi zawierać arkusz `Status_var` i kolumny:
+znajduje się skrypt. Preferowany arkusz to `Status_var`. Jeśli plik ma tylko
+jeden arkusz, skrypt użyje go również pod inną nazwą. Arkusz musi zawierać
+kolumny:
 
 - `Address` — adres rejestru; musi dać się odczytać jako liczba całkowita,
 - `Name` — nazwa zmiennej,
@@ -114,6 +117,10 @@ prezentowane jako `FALSE` i `TRUE`.
 Skrypt odczytuje tylko adresy obecne w arkuszu i należące do wybranego zakresu.
 Jeśli zmienna ma typ `UDINT`, odczytuje również następny rejestr, o ile mieści
 się on w wybranym zakresie.
+`address_base` określa numerację adresów w arkuszu i opcjach `--start`/`--count`.
+Przy wartości `1` (domyślnej, zgodnej z `modpoll`) skrypt odejmuje jeden przed
+wywołaniem `pymodbus`, który przyjmuje adres PDU od zera. Ustaw `0`, jeśli mapa
+zawiera adresy PDU i mają być przekazywane bez zmian.
 
 ## Obsługa i wyniki
 
@@ -139,7 +146,8 @@ Przykładowe dopisywanie raportów do pliku:
 - **Nie znaleziono pliku z mapą zmiennych** — sprawdź ścieżkę podaną przez
   `--metadata`; domyślnie plik powinien znajdować się pod
   `registers/status_var.xlsx`.
-- **Brak arkusza lub wymaganych kolumn** — sprawdź nazwę arkusza
-  (`Status_var`) i nagłówki `Address`, `Name`, `IEC type`.
+- **Brak arkusza lub wymaganych kolumn** — sprawdź, czy plik zawiera arkusz
+  `Status_var` (lub tylko jeden arkusz) oraz nagłówki `Address`, `Name`,
+  `IEC type`.
 - **Brak biblioteki Python** — zainstaluj zależności poleceniem z sekcji
   [Wymagania](#wymagania).
